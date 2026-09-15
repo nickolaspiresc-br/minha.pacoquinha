@@ -5,7 +5,6 @@ Lovify Game is an interactive quiz game designed for couples, where players answ
 
 ## Features
 - Private shared session for exactly two connected users.
-- Login protected by the shared password `euteamoleide`.
 - Answer questions and guess partner's responses.
 - Real-time chat functionality for players.
 - Live player list in the Games and List tabs.
