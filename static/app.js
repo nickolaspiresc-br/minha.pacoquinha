@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 let socketUnavailable = typeof window.io !== "function";
 let socket;
 try {
@@ -12,11 +13,19 @@ try {
   console.error("[Socket] initialization failed", error);
 }
 if (!socket) socket = { connected: false, emit() {}, on() {} };
+=======
+const socket = io({
+  transports: ["polling", "websocket"],
+  upgrade: true,
+  reconnection: true
+});
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
 let room = null;
 let isAdmin = false;
 let playerName = "";
 let pendingFile = null;
+<<<<<<< HEAD
 let chatSendPending = false;
 let activeGame = null;
 let noteTimer = null;
@@ -49,6 +58,20 @@ window.handleLoginSubmit = function handleLoginSubmit(event) {
   return false;
 };
 
+=======
+let activeGame = null;
+let noteTimer = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  createHeartsBackground();
+  $("loginForm").addEventListener("submit", event => {
+    event.preventDefault();
+    login();
+  });
+  $("sharedNote").addEventListener("input", queueNoteUpdate);
+});
+
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 function createHeartsBackground() {
   const container = document.getElementById("heartsBg");
   if (!container) return;
@@ -79,6 +102,7 @@ function showError(message) {
   if ($("gameMessage")) $("gameMessage").textContent = message;
 }
 
+<<<<<<< HEAD
 function resetLoginButton() {
   const submitButton = document.querySelector("#loginForm button[type='submit']");
   if (submitButton) {
@@ -87,6 +111,8 @@ function resetLoginButton() {
   }
 }
 
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 function login() {
   const name = $("name").value.trim();
   const password = $("password").value;
@@ -94,6 +120,7 @@ function login() {
     showError("Preencha seu nome e sua senha para entrar 💕");
     return;
   }
+<<<<<<< HEAD
   if (password !== "euteamoleide") {
     showError("Essa senha não confere. Tente novamente com carinho 💗");
     return;
@@ -123,6 +150,12 @@ function sendLogin(name, password) {
 
 socket.on("login_success", data => {
   clearTimeout(loginTimeout);
+=======
+  socket.emit("authenticate", { name, password });
+}
+
+socket.on("login_success", data => {
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   room = data.room;
     playerName = data.name;
   isAdmin = data.role === "admin";
@@ -130,6 +163,7 @@ socket.on("login_success", data => {
 });
 
 function openRoom(data) {
+<<<<<<< HEAD
   const loginCard = $("loginCard");
   loginCard.classList.add("fade-out");
   loginCard.setAttribute("aria-hidden", "true");
@@ -144,6 +178,14 @@ function openRoom(data) {
   renderNote(data.note || { text: "", can_undo: false });
   renderListItems(data.list_items || []);
   renderCalendar(data.calendar || { events: [], cycle: null });
+=======
+  $("loginCard").classList.add("fade-out");
+  setTimeout(() => { $("loginCard").hidden = true; }, 350);
+  $("mainDashboard").hidden = false;
+  renderPlayers(data.players || []);
+  (data.chat_messages || []).forEach(renderChatMessage);
+  renderNote(data.note || { text: "", can_undo: false });
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   if (data.game) {
     renderGame(data.game);
   } else {
@@ -156,6 +198,7 @@ socket.on("access_denied", data => {
 });
 
 socket.on("login_failed", data => {
+<<<<<<< HEAD
   clearTimeout(loginTimeout);
   showError(data.message);
   resetLoginButton();
@@ -171,6 +214,9 @@ socket.on("connect", () => {
     pendingLogin = null;
     sendLogin(credentials.name, credentials.password);
   }
+=======
+  showError(data.message);
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 });
 
 function renderPlayers(players) {
@@ -194,29 +240,43 @@ function switchTab(tab) {
     $("gamesTabSection").hidden = false;
     $("chatTabSection").hidden = true;
     $("listTabSection").hidden = true;
+<<<<<<< HEAD
     $("calendarTabSection").hidden = true;
     $("tabGamesBtn").classList.add("active");
     $("tabChatBtn").classList.remove("active");
     $("tabCalendarBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
     $("tabCalendarBtn").classList.remove("active");
+=======
+    $("tabGamesBtn").classList.add("active");
+    $("tabChatBtn").classList.remove("active");
+    $("tabListBtn").classList.remove("active");
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   } else if (tab === 'chat') {
     $("gamesTabSection").hidden = true;
     $("chatTabSection").hidden = false;
     $("listTabSection").hidden = true;
+<<<<<<< HEAD
     $("calendarTabSection").hidden = true;
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     $("tabChatBtn").classList.add("active");
     $("tabGamesBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
     $("chatBadge").hidden = true;
     scrollToBottomChat();
+<<<<<<< HEAD
   } else if (tab === 'list') {
+=======
+  } else {
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     $("gamesTabSection").hidden = true;
     $("chatTabSection").hidden = true;
     $("listTabSection").hidden = false;
     $("tabListBtn").classList.add("active");
     $("tabGamesBtn").classList.remove("active");
     $("tabChatBtn").classList.remove("active");
+<<<<<<< HEAD
     $("tabCalendarBtn").classList.remove("active");
     socket.emit("note_request");
   } else {
@@ -229,6 +289,8 @@ function switchTab(tab) {
     $("tabChatBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
     socket.emit("calendar_request");
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   }
 }
 
@@ -265,6 +327,7 @@ function queueNoteUpdate() {
 function undoNote() { socket.emit('note_undo'); }
 
 socket.on('note_updated', renderNote);
+<<<<<<< HEAD
 socket.on('note_updated', () => console.info('[Supabase] shared note synchronized'));
 
 function searchListTitle() {
@@ -429,6 +492,8 @@ socket.on("calendar_updated", data => {
     hasPrivateCycle: Boolean(data.cycle)
   });
 });
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
 function renderGame(game) {
   activeGame = game;
@@ -576,6 +641,7 @@ async function handleFileSelect(e) {
       pendingFile = data;
       $("filePreviewName").textContent = `📎 ${data.filename}`;
       $("filePreviewContainer").hidden = false;
+<<<<<<< HEAD
       console.info("[Chat] upload ready", data.filename);
     } else {
       showError(data.error || "Não foi possível preparar o arquivo.");
@@ -584,6 +650,11 @@ async function handleFileSelect(e) {
   } catch (err) {
     showError("Erro ao carregar o arquivo.");
     console.error("[Chat] upload failed", err);
+=======
+    }
+  } catch (err) {
+    showError("Erro ao carregar o arquivo.");
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   }
 }
 
@@ -597,15 +668,20 @@ function sendChatMessage() {
   const input = $("chatInput");
   const text = input.value.trim();
 
+<<<<<<< HEAD
   if (chatSendPending || (!text && !pendingFile)) return;
 
   chatSendPending = true;
+=======
+  if (!text && !pendingFile) return;
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
   socket.emit("send_chat_message", {
     room,
     text: text,
     file: pendingFile
   });
+<<<<<<< HEAD
   console.info("[Chat] message queued", { hasText: Boolean(text), hasFile: Boolean(pendingFile) });
 }
 
@@ -614,6 +690,12 @@ socket.on("chat_send_failed", data => {
   showError(data.message || "Não foi possível enviar a mensagem.");
   console.warn("[Chat] send failed", data.message);
 });
+=======
+
+  input.value = "";
+  cancelFileUpload();
+}
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
 function renderChatMessage(msg) {
   const container = $("chatMessages");
@@ -621,11 +703,14 @@ function renderChatMessage(msg) {
   if (placeholder) placeholder.remove();
 
   const isMe = msg.sender_sid === socket.id;
+<<<<<<< HEAD
   if (isMe && chatSendPending) {
     $("chatInput").value = "";
     cancelFileUpload();
     chatSendPending = false;
   }
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   const msgDiv = document.createElement("div");
   msgDiv.className = `chat-bubble ${isMe ? 'me' : 'partner'}`;
   msgDiv.id = msg.id;

@@ -9,6 +9,7 @@ import unicodedata
 import re
 import uuid
 import time
+<<<<<<< HEAD
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
@@ -21,6 +22,14 @@ load_dotenv()
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+=======
+from difflib import SequenceMatcher
+from flask import Flask, render_template, request, send_from_directory
+from flask_socketio import SocketIO, emit, join_room, disconnect as disconnect_client
+
+app = Flask(__name__)
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret")
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 UPLOAD_FOLDER = os.path.join("data", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
@@ -28,6 +37,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 DATA_DIR = "data"
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.json")
 USED_FILE = os.path.join(DATA_DIR, "used.json")
+<<<<<<< HEAD
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://tkuagggdzzyagvkgrksc.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_NOTE_ID = 1
@@ -37,6 +47,12 @@ supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_ANON_KEY e
 
 SIMILARITY_THRESHOLD = 0.50
 ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "euteamoleide")
+=======
+NOTE_FILE = os.path.join(DATA_DIR, "shared_note.json")
+
+SIMILARITY_THRESHOLD = 0.50
+ACCESS_PASSWORD = "euteamoleide"
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 SESSION_ROOM = "couple-session"
 MAX_USERS = 2
 ADEDONHA_DURATION = 90
@@ -84,6 +100,7 @@ def ensure_files():
     if not os.path.exists(USED_FILE):
         with open(USED_FILE, "w", encoding="utf-8") as f:
             json.dump({}, f, ensure_ascii=False, indent=2)
+<<<<<<< HEAD
 def _load_note_from_supabase():
     if supabase is None:
         raise RuntimeError("SUPABASE_ANON_KEY não configurada")
@@ -220,6 +237,23 @@ def fetch_omdb_title(title):
         "poster": result.get("Poster", "N/A"),
         "type": result.get("Type", ""),
     }
+=======
+    if not os.path.exists(NOTE_FILE):
+        with open(NOTE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"text": "", "history": []}, f, ensure_ascii=False, indent=2)
+
+
+def load_note():
+    ensure_files()
+    with open(NOTE_FILE, "r", encoding="utf-8") as f:
+        note = json.load(f)
+    return {"text": note.get("text", ""), "history": note.get("history", [])}
+
+
+def save_note(note):
+    with open(NOTE_FILE, "w", encoding="utf-8") as f:
+        json.dump(note, f, ensure_ascii=False, indent=2)
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
 
 def game_snapshot(room):
@@ -395,6 +429,7 @@ def upload_file_route():
     if file.filename == "":
         return {"error": "Arquivo sem nome"}, 400
 
+<<<<<<< HEAD
     if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
         return {"error": "Arquivo muito grande. O limite é 16 MB."}, 413
 
@@ -402,6 +437,9 @@ def upload_file_route():
     allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt", ".mp4", ".mov"}
     if ext not in allowed_extensions:
         return {"error": "Tipo de arquivo não suportado."}, 415
+=======
+    ext = os.path.splitext(file.filename)[1]
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     unique_name = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_name)
     file.save(save_path)
@@ -409,6 +447,7 @@ def upload_file_route():
     file_url = f"/uploads/{unique_name}"
     return {"url": file_url, "filename": file.filename}
 
+<<<<<<< HEAD
 
 @app.errorhandler(413)
 def request_entity_too_large(error):
@@ -424,6 +463,8 @@ def supabase_check():
         app.logger.exception("Supabase connection check failed")
         return {"ok": False, "error": str(error)}, 503
 
+=======
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 @socketio.on("connect")
 def handle_connect():
     with lock:
@@ -456,7 +497,11 @@ def authenticate(data):
             room["admin_sid"] = room["admin_sid"] or request.sid
 
     join_room(SESSION_ROOM)
+<<<<<<< HEAD
     note = empty_list_state()
+=======
+    note = load_note()
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     emit("login_success", {
         "room": SESSION_ROOM,
         "name": name,
@@ -466,12 +511,18 @@ def authenticate(data):
             for player in room["players"].values()
         ],
         "chat_messages": room["chat_messages"],
+<<<<<<< HEAD
         "note": {**note, "can_undo": False},
         "list_items": [],
         "calendar": {"events": [], "cycle": None},
         "game": game_snapshot(room)
     })
     socketio.start_background_task(send_initial_shared_state, request.sid, name)
+=======
+        "note": {**note, "can_undo": bool(note["history"])},
+        "game": game_snapshot(room)
+    })
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     broadcast_players(room)
 
 @socketio.on("start_game")
@@ -530,13 +581,18 @@ def leave_game(data=None):
 def note_update(data):
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
+<<<<<<< HEAD
     note = load_note_sync()
+=======
+    note = load_note()
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     text = str(data.get("text") or "")[:20000]
     if text == note["text"]:
         return
     note["history"].append(note["text"])
     note["history"] = note["history"][-50:]
     note["text"] = text
+<<<<<<< HEAD
     save_note_sync(note)
     socketio.emit("note_updated", {"text": text, "can_undo": bool(note["history"])}, to=SESSION_ROOM)
 
@@ -552,10 +608,17 @@ def note_request():
     emit("calendar_updated", calendar_snapshot(note, load_cycle_sync(player_name)))
 
 
+=======
+    save_note(note)
+    socketio.emit("note_updated", {"text": text, "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+
+
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 @socketio.on("note_undo")
 def note_undo():
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
+<<<<<<< HEAD
     note = load_note_sync()
     if not note["history"]:
         return
@@ -670,6 +733,16 @@ def calendar_cycle_save(data):
     emit("calendar_updated", calendar_snapshot(load_note_sync(), cycle))
 
 
+=======
+    note = load_note()
+    if not note["history"]:
+        return
+    note["text"] = note["history"].pop()
+    save_note(note)
+    socketio.emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+
+
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 @socketio.on("stop_draw_letter")
 def stop_draw_letter():
     room = rooms.get(SESSION_ROOM)
@@ -831,6 +904,7 @@ def send_chat_message(data):
     room = rooms.get(room_code)
 
     if not room or request.sid not in room["players"]:
+<<<<<<< HEAD
         emit("chat_send_failed", {"message": "Sua sessão de chat não está ativa."})
         return
 
@@ -847,6 +921,13 @@ def send_chat_message(data):
             "filename": str(file_info.get("filename") or "arquivo")[:160],
         }
 
+=======
+        return
+
+    if not text and not file_info:
+        return
+
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
     msg_id = f"msg-{uuid.uuid4().hex[:8]}"
     sender_name = room["players"][request.sid]["name"]
 
@@ -860,9 +941,13 @@ def send_chat_message(data):
     }
 
     room["chat_messages"].append(msg_obj)
+<<<<<<< HEAD
     room["chat_messages"] = room["chat_messages"][-100:]
     socketio.emit("chat_message_received", msg_obj, to=room_code)
     app.logger.info("[Chat] message sent id=%s has_file=%s", msg_id, bool(file_info))
+=======
+    socketio.emit("chat_message_received", msg_obj, to=room_code)
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 
 @socketio.on("edit_chat_message")
 def edit_chat_message(data):
@@ -914,5 +999,9 @@ ensure_files()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+<<<<<<< HEAD
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
     socketio.run(app, host="0.0.0.0", port=port, debug=debug, use_reloader=False)
+=======
+    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=False)
+>>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
