@@ -1,24 +1,53 @@
-const socket = io({
-  transports: ["polling", "websocket"],
-  upgrade: true,
-  reconnection: true
-});
+let socketUnavailable = typeof window.io !== "function";
+let socket;
+try {
+  socket = socketUnavailable ? null : window.io({
+    transports: ["polling", "websocket"],
+    upgrade: true,
+    reconnection: true
+  });
+} catch (error) {
+  socketUnavailable = true;
+  socket = { connected: false, emit() {}, on() {} };
+  console.error("[Socket] initialization failed", error);
+}
+if (!socket) socket = { connected: false, emit() {}, on() {} };
 
 let room = null;
 let isAdmin = false;
 let playerName = "";
 let pendingFile = null;
+let chatSendPending = false;
 let activeGame = null;
 let noteTimer = null;
+let listItems = [];
+let calendarEvents = [];
+let calendarCycle = null;
+let calendarDate = new Date();
+let selectedCalendarDate = null;
+let loginTimeout = null;
+let pendingLogin = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   createHeartsBackground();
-  $("loginForm").addEventListener("submit", event => {
-    event.preventDefault();
-    login();
+  const sharedNote = $("sharedNote");
+  if (sharedNote) sharedNote.addEventListener("input", queueNoteUpdate);
+  const eventForm = $("eventForm");
+  if (eventForm) eventForm.addEventListener("submit", saveCalendarEvent);
+  const cycleForm = $("cycleForm");
+  if (cycleForm) cycleForm.addEventListener("submit", saveCycleSettings);
+  const listSearchInput = $("listSearchInput");
+  if (listSearchInput) listSearchInput.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); searchListTitle(); }
   });
-  $("sharedNote").addEventListener("input", queueNoteUpdate);
 });
+
+window.handleLoginSubmit = function handleLoginSubmit(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  login();
+  return false;
+};
 
 function createHeartsBackground() {
   const container = document.getElementById("heartsBg");
@@ -50,6 +79,14 @@ function showError(message) {
   if ($("gameMessage")) $("gameMessage").textContent = message;
 }
 
+function resetLoginButton() {
+  const submitButton = document.querySelector("#loginForm button[type='submit']");
+  if (submitButton) {
+    submitButton.disabled = false;
+    submitButton.textContent = "Entrar no nosso espaço 💖";
+  }
+}
+
 function login() {
   const name = $("name").value.trim();
   const password = $("password").value;
@@ -57,10 +94,35 @@ function login() {
     showError("Preencha seu nome e sua senha para entrar 💕");
     return;
   }
+  if (password !== "euteamoleide") {
+    showError("Essa senha não confere. Tente novamente com carinho 💗");
+    return;
+  }
+  if (socketUnavailable) {
+    showError("O módulo de conexão não carregou. Atualize a página e tente novamente 💗");
+    return;
+  }
+  if (!socket || !socket.connected) {
+    pendingLogin = { name, password };
+    showError("Conectando ao nosso espaço... 💗");
+    return;
+  }
+  sendLogin(name, password);
+}
+
+function sendLogin(name, password) {
+  const submitButton = document.querySelector("#loginForm button[type='submit']");
+  if (submitButton) { submitButton.disabled = true; submitButton.textContent = "Entrando..."; }
   socket.emit("authenticate", { name, password });
+  clearTimeout(loginTimeout);
+  loginTimeout = setTimeout(() => {
+    resetLoginButton();
+    showError("A conexão demorou mais que o esperado. Tente entrar novamente 💗");
+  }, 10000);
 }
 
 socket.on("login_success", data => {
+  clearTimeout(loginTimeout);
   room = data.room;
     playerName = data.name;
   isAdmin = data.role === "admin";
@@ -68,12 +130,20 @@ socket.on("login_success", data => {
 });
 
 function openRoom(data) {
-  $("loginCard").classList.add("fade-out");
-  setTimeout(() => { $("loginCard").hidden = true; }, 350);
+  const loginCard = $("loginCard");
+  loginCard.classList.add("fade-out");
+  loginCard.setAttribute("aria-hidden", "true");
+  setTimeout(() => {
+    loginCard.hidden = true;
+    loginCard.style.display = "none";
+  }, 350);
   $("mainDashboard").hidden = false;
+  $("mainDashboard").style.display = "block";
   renderPlayers(data.players || []);
   (data.chat_messages || []).forEach(renderChatMessage);
   renderNote(data.note || { text: "", can_undo: false });
+  renderListItems(data.list_items || []);
+  renderCalendar(data.calendar || { events: [], cycle: null });
   if (data.game) {
     renderGame(data.game);
   } else {
@@ -86,7 +156,21 @@ socket.on("access_denied", data => {
 });
 
 socket.on("login_failed", data => {
+  clearTimeout(loginTimeout);
   showError(data.message);
+  resetLoginButton();
+});
+
+socket.on("connect_error", () => showError("Não foi possível conectar agora. Confira sua internet e tente novamente 💗"));
+socket.on("connect", () => {
+  console.info("[Socket] connected", socket.id);
+  const errorElement = $("error");
+  if (errorElement && errorElement.textContent.includes("Conectando")) errorElement.hidden = true;
+  if (pendingLogin) {
+    const credentials = pendingLogin;
+    pendingLogin = null;
+    sendLogin(credentials.name, credentials.password);
+  }
 });
 
 function renderPlayers(players) {
@@ -110,25 +194,41 @@ function switchTab(tab) {
     $("gamesTabSection").hidden = false;
     $("chatTabSection").hidden = true;
     $("listTabSection").hidden = true;
+    $("calendarTabSection").hidden = true;
     $("tabGamesBtn").classList.add("active");
     $("tabChatBtn").classList.remove("active");
+    $("tabCalendarBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
+    $("tabCalendarBtn").classList.remove("active");
   } else if (tab === 'chat') {
     $("gamesTabSection").hidden = true;
     $("chatTabSection").hidden = false;
     $("listTabSection").hidden = true;
+    $("calendarTabSection").hidden = true;
     $("tabChatBtn").classList.add("active");
     $("tabGamesBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
     $("chatBadge").hidden = true;
     scrollToBottomChat();
-  } else {
+  } else if (tab === 'list') {
     $("gamesTabSection").hidden = true;
     $("chatTabSection").hidden = true;
     $("listTabSection").hidden = false;
     $("tabListBtn").classList.add("active");
     $("tabGamesBtn").classList.remove("active");
     $("tabChatBtn").classList.remove("active");
+    $("tabCalendarBtn").classList.remove("active");
+    socket.emit("note_request");
+  } else {
+    $("gamesTabSection").hidden = true;
+    $("chatTabSection").hidden = true;
+    $("listTabSection").hidden = true;
+    $("calendarTabSection").hidden = false;
+    $("tabCalendarBtn").classList.add("active");
+    $("tabGamesBtn").classList.remove("active");
+    $("tabChatBtn").classList.remove("active");
+    $("tabListBtn").classList.remove("active");
+    socket.emit("calendar_request");
   }
 }
 
@@ -165,6 +265,170 @@ function queueNoteUpdate() {
 function undoNote() { socket.emit('note_undo'); }
 
 socket.on('note_updated', renderNote);
+socket.on('note_updated', () => console.info('[Supabase] shared note synchronized'));
+
+function searchListTitle() {
+  const input = $("listSearchInput");
+  const status = $("listSearchStatus");
+  const title = input.value.trim();
+  if (title.length < 2) {
+    status.textContent = "Digite pelo menos 2 caracteres.";
+    return;
+  }
+  status.textContent = "Procurando na OMDb...";
+  $("listSearchBtn").disabled = true;
+  socket.emit("list_search", { title });
+}
+
+socket.on("list_search_result", data => {
+  $("listSearchBtn").disabled = false;
+  const status = $("listSearchStatus");
+  if (!data.ok) {
+    status.textContent = data.error || "Não encontramos esse título.";
+    return;
+  }
+  console.info("[OMDb] title found", data.item.imdbID, data.item.title);
+  status.textContent = "Título encontrado. Adicione à lista:";
+  const item = data.item;
+  const preview = document.createElement("article");
+  preview.className = "list-result-card";
+  preview.innerHTML = listItemMarkup(item) + '<button type="button" class="secondary list-add-btn">Adicionar</button>';
+  preview.querySelector(".list-add-btn").addEventListener("click", () => {
+    socket.emit("list_add", { item });
+    status.textContent = "Salvando na lista compartilhada...";
+  });
+  $("listItems").prepend(preview);
+});
+
+function listItemMarkup(item) {
+  const poster = item.poster && item.poster !== "N/A" ? `<img src="${escapeHtml(item.poster)}" alt="Capa de ${escapeHtml(item.title)}" loading="lazy">` : '<div class="poster-placeholder">🎬</div>';
+  return `<div class="list-poster">${poster}</div><div class="list-item-content"><button type="button" class="list-title-toggle" aria-expanded="false">${escapeHtml(item.title)}</button><span>${escapeHtml(item.year || "Ano desconhecido")}</span><div class="list-item-details" hidden><p>${escapeHtml(item.plot || "Sinopse não disponível.")}</p></div></div>`;
+}
+
+function bindListTitleToggles(container) {
+  container.querySelectorAll(".list-title-toggle").forEach(button => button.addEventListener("click", () => {
+    const details = button.parentElement.querySelector(".list-item-details");
+    const expanded = !details.hidden;
+    details.hidden = expanded;
+    button.setAttribute("aria-expanded", String(!expanded));
+  }));
+}
+
+function renderListItems(items) {
+  listItems = items || [];
+  $("listItems").innerHTML = listItems.length ? listItems.map(item => `<article class="list-result-card saved-list-card" data-id="${escapeHtml(item.imdbID)}">${listItemMarkup(item)}<button type="button" class="remove-list-btn" aria-label="Remover ${escapeHtml(item.title)}">×</button></article>`).join("") : '<p class="empty-list">Sua lista ainda está esperando o primeiro título ✨</p>';
+  bindListTitleToggles($("listItems"));
+  $("listItems").querySelectorAll(".remove-list-btn").forEach(button => button.addEventListener("click", () => socket.emit("list_remove", { imdbID: button.closest("article").dataset.id })));
+}
+
+socket.on("list_updated", data => {
+  renderListItems(data.items || []);
+  console.info("[Supabase] shared movie list synchronized", data.items?.length || 0);
+  $("listSearchStatus").textContent = "Lista sincronizada para vocês dois 💕";
+});
+
+function isoDate(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dateFromIso(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addDays(date, amount) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + amount);
+  return result;
+}
+
+function calendarCycleDates() {
+  if (!calendarCycle) return null;
+  const last = dateFromIso(calendarCycle.last_period);
+  const next = addDays(last, calendarCycle.cycle_length);
+  return { last, next, periodEnd: addDays(next, 4), fertileStart: addDays(next, -19), fertileEnd: addDays(next, -13) };
+}
+
+function renderCalendar(data) {
+  if (data.events) calendarEvents = data.events;
+  if (Object.prototype.hasOwnProperty.call(data, "cycle")) calendarCycle = data.cycle;
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  $("calendarMonthLabel").textContent = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(calendarDate);
+  const firstDay = new Date(year, month, 1).getDay();
+  const days = new Date(year, month + 1, 0).getDate();
+  const cycle = calendarCycleDates();
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push('<span class="calendar-empty"></span>');
+  for (let day = 1; day <= days; day++) {
+    const current = new Date(year, month, day);
+    const date = isoDate(current);
+    const dayEvents = calendarEvents.filter(event => event.date === date);
+    const classes = ["calendar-day"];
+    if (date === isoDate(new Date())) classes.push("today");
+    if (selectedCalendarDate === date) classes.push("selected");
+    if (cycle && current >= cycle.next && current <= cycle.periodEnd) classes.push("period-day");
+    if (cycle && current >= cycle.fertileStart && current <= cycle.fertileEnd) classes.push("fertile-day");
+    cells.push(`<button type="button" class="${classes.join(" ")}" onclick="selectCalendarDate('${date}')"><span>${day}</span>${dayEvents.length ? '<i class="event-dot"></i>' : ''}</button>`);
+  }
+  $("calendarGrid").innerHTML = cells.join("");
+  renderSelectedCalendarDate();
+  renderCycleSummary(cycle);
+}
+
+function changeCalendarMonth(amount) { calendarDate.setMonth(calendarDate.getMonth() + amount); renderCalendar({}); }
+
+function selectCalendarDate(date) { selectedCalendarDate = date; renderCalendar({}); }
+
+function renderSelectedCalendarDate() {
+  const label = $("selectedDateLabel");
+  const form = $("eventForm");
+  if (!selectedCalendarDate) { label.textContent = "Escolha um dia para marcar um encontro."; form.hidden = true; }
+  else { label.textContent = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(dateFromIso(selectedCalendarDate)); form.hidden = false; }
+  const events = calendarEvents.filter(event => event.date === selectedCalendarDate);
+  $("calendarEvents").innerHTML = events.map(event => `<div class="calendar-event"><span>💕 ${escapeHtml(event.title)}</span><button type="button" aria-label="Remover encontro" onclick="removeCalendarEvent('${event.id}')">×</button></div>`).join("");
+}
+
+function saveCalendarEvent(event) {
+  event.preventDefault();
+  socket.emit("calendar_event_save", { date: selectedCalendarDate, title: $("eventTitle").value.trim() });
+  $("eventTitle").value = "";
+}
+
+function removeCalendarEvent(id) { socket.emit("calendar_event_remove", { id }); }
+
+function saveCycleSettings(event) {
+  event.preventDefault();
+  socket.emit("calendar_cycle_save", {
+    last_period: $("lastPeriod").value,
+    cycle_length: $("cycleLength").value,
+    anotacoes_extras: $("cycleNotes").value
+  });
+}
+
+function renderCycleSummary(cycle) {
+  const summary = $("cycleSummary");
+  const alert = $("cycleAlert");
+  if (!cycle) { summary.textContent = "Seu ciclo fica privado e só aparece depois que você configurar."; alert.hidden = true; return; }
+  $("lastPeriod").value = cycle.last_period;
+  $("cycleLength").value = cycle.cycle_length;
+  $("cycleNotes").value = cycle.notes || "";
+  const dates = calendarCycleDates();
+  summary.innerHTML = `<strong>Estimativas para você</strong><span>Próxima menstruação: ${formatDate(dates.next)}</span><span>Período previsto: ${formatDate(dates.next)} a ${formatDate(dates.periodEnd)}</span><span>Período fértil estimado: ${formatDate(dates.fertileStart)} a ${formatDate(dates.fertileEnd)}</span>`;
+  const delayed = new Date() > dates.next;
+  alert.hidden = !delayed;
+  alert.textContent = delayed ? "Sua previsão passou sem um novo registro. Ciclos podem variar; cuide-se com carinho e procure orientação profissional se isso trouxer preocupação." : "";
+}
+
+function formatDate(date) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium" }).format(date); }
+
+socket.on("calendar_updated", renderCalendar);
+socket.on("calendar_updated", data => {
+  console.info("[Supabase] calendar synchronized", {
+    events: data.events?.length || 0,
+    hasPrivateCycle: Boolean(data.cycle)
+  });
+});
 
 function renderGame(game) {
   activeGame = game;
@@ -312,9 +576,14 @@ async function handleFileSelect(e) {
       pendingFile = data;
       $("filePreviewName").textContent = `📎 ${data.filename}`;
       $("filePreviewContainer").hidden = false;
+      console.info("[Chat] upload ready", data.filename);
+    } else {
+      showError(data.error || "Não foi possível preparar o arquivo.");
+      cancelFileUpload();
     }
   } catch (err) {
     showError("Erro ao carregar o arquivo.");
+    console.error("[Chat] upload failed", err);
   }
 }
 
@@ -328,17 +597,23 @@ function sendChatMessage() {
   const input = $("chatInput");
   const text = input.value.trim();
 
-  if (!text && !pendingFile) return;
+  if (chatSendPending || (!text && !pendingFile)) return;
+
+  chatSendPending = true;
 
   socket.emit("send_chat_message", {
     room,
     text: text,
     file: pendingFile
   });
-
-  input.value = "";
-  cancelFileUpload();
+  console.info("[Chat] message queued", { hasText: Boolean(text), hasFile: Boolean(pendingFile) });
 }
+
+socket.on("chat_send_failed", data => {
+  chatSendPending = false;
+  showError(data.message || "Não foi possível enviar a mensagem.");
+  console.warn("[Chat] send failed", data.message);
+});
 
 function renderChatMessage(msg) {
   const container = $("chatMessages");
@@ -346,6 +621,11 @@ function renderChatMessage(msg) {
   if (placeholder) placeholder.remove();
 
   const isMe = msg.sender_sid === socket.id;
+  if (isMe && chatSendPending) {
+    $("chatInput").value = "";
+    cancelFileUpload();
+    chatSendPending = false;
+  }
   const msgDiv = document.createElement("div");
   msgDiv.className = `chat-bubble ${isMe ? 'me' : 'partner'}`;
   msgDiv.id = msg.id;

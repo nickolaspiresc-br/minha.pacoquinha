@@ -9,12 +9,18 @@ import unicodedata
 import re
 import uuid
 import time
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
 from flask import Flask, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, disconnect as disconnect_client
+from dotenv import load_dotenv
+from supabase import create_client
 
+load_dotenv()
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 UPLOAD_FOLDER = os.path.join("data", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
@@ -22,10 +28,15 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 DATA_DIR = "data"
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.json")
 USED_FILE = os.path.join(DATA_DIR, "used.json")
-NOTE_FILE = os.path.join(DATA_DIR, "shared_note.json")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://tkuagggdzzyagvkgrksc.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+SUPABASE_NOTE_ID = 1
+OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
+OMDB_API_URL = "https://www.omdbapi.com/"
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_ANON_KEY else None
 
 SIMILARITY_THRESHOLD = 0.50
-ACCESS_PASSWORD = "euteamoleide"
+ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "euteamoleide")
 SESSION_ROOM = "couple-session"
 MAX_USERS = 2
 ADEDONHA_DURATION = 90
@@ -73,21 +84,142 @@ def ensure_files():
     if not os.path.exists(USED_FILE):
         with open(USED_FILE, "w", encoding="utf-8") as f:
             json.dump({}, f, ensure_ascii=False, indent=2)
-    if not os.path.exists(NOTE_FILE):
-        with open(NOTE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"text": "", "history": []}, f, ensure_ascii=False, indent=2)
+def _load_note_from_supabase():
+    if supabase is None:
+        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
+    app.logger.info("[Supabase] loading filmes_lista id=%s", SUPABASE_NOTE_ID)
+    response = (
+        supabase.table("filmes_lista")
+        .select("text, history, items, events")
+        .eq("id", SUPABASE_NOTE_ID)
+        .maybe_single()
+        .execute()
+    )
+    row = response.data or {}
+    return {
+        "text": row.get("text", ""),
+        "history": row.get("history", []) or [],
+        "items": row.get("items", []) or [],
+        "events": row.get("events", []) or [],
+    }
 
 
-def load_note():
-    ensure_files()
-    with open(NOTE_FILE, "r", encoding="utf-8") as f:
-        note = json.load(f)
-    return {"text": note.get("text", ""), "history": note.get("history", [])}
+def _save_note_to_supabase(note):
+    if supabase is None:
+        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
+    app.logger.info("[Supabase] saving filmes_lista id=%s", SUPABASE_NOTE_ID)
+    supabase.table("filmes_lista").upsert({
+        "id": SUPABASE_NOTE_ID,
+        "text": note["text"],
+        "history": note["history"],
+        "items": note.get("items", []),
+        "events": note.get("events", []),
+    }).execute()
 
 
-def save_note(note):
-    with open(NOTE_FILE, "w", encoding="utf-8") as f:
-        json.dump(note, f, ensure_ascii=False, indent=2)
+def load_note_sync():
+    return _load_note_from_supabase()
+
+
+def save_note_sync(note):
+    return _save_note_to_supabase(note)
+
+
+def empty_list_state():
+    return {"text": "", "history": [], "items": [], "events": []}
+
+
+def supabase_is_configured():
+    return supabase is not None
+
+
+def _load_cycle_from_supabase(player_name):
+    if supabase is None:
+        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
+    app.logger.info("[Supabase] loading ciclo_menstrual usuario=%s", player_name)
+    response = (
+        supabase.table("ciclo_menstrual")
+        .select("data_ultima_menstruacao, duracao_ciclo, anotacoes_extras")
+        .eq("usuario", player_name)
+        .maybe_single()
+        .execute()
+    )
+    row = response.data
+    if not row:
+        return None
+    return {
+        "last_period": row.get("data_ultima_menstruacao"),
+        "cycle_length": row.get("duracao_ciclo", 28),
+        "notes": row.get("anotacoes_extras", "") or "",
+    }
+
+
+def _save_cycle_to_supabase(player_name, cycle):
+    if supabase is None:
+        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
+    app.logger.info("[Supabase] upserting ciclo_menstrual usuario=%s", player_name)
+    supabase.table("ciclo_menstrual").upsert({
+        "usuario": player_name,
+        "data_ultima_menstruacao": cycle["last_period"],
+        "duracao_ciclo": cycle["cycle_length"],
+        "anotacoes_extras": cycle.get("notes", ""),
+    }, on_conflict="usuario").execute()
+
+
+def load_cycle_sync(player_name):
+    return _load_cycle_from_supabase(player_name)
+
+
+def save_cycle_sync(player_name, cycle):
+    return _save_cycle_to_supabase(player_name, cycle)
+
+
+def calendar_snapshot(note, cycle):
+    return {
+        "events": note.get("events", []),
+        "cycle": cycle,
+    }
+
+
+def send_initial_shared_state(sid, player_name):
+    note = empty_list_state()
+    cycle = None
+    if supabase_is_configured():
+        try:
+            note = load_note_sync()
+        except Exception:
+            app.logger.exception("Could not load shared state after authentication")
+        try:
+            cycle = load_cycle_sync(player_name)
+        except Exception:
+            app.logger.exception("Could not load menstrual cycle after authentication")
+    socketio.emit("note_updated", {
+        "text": note["text"],
+        "can_undo": bool(note["history"]),
+    }, to=sid)
+    socketio.emit("list_updated", {"items": note["items"]}, to=sid)
+    socketio.emit("calendar_updated", calendar_snapshot(note, cycle), to=sid)
+
+
+def fetch_omdb_title(title):
+    if not OMDB_API_KEY:
+        raise RuntimeError("OMDB_API_KEY não configurada")
+    app.logger.info("[OMDb] searching title=%s", title)
+    query = urlencode({"apikey": OMDB_API_KEY, "t": title, "plot": "full", "r": "json"})
+    request = Request(f"{OMDB_API_URL}?{query}", headers={"User-Agent": "minha-pacoquinha/1.0"})
+    with urlopen(request, timeout=8) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if result.get("Response") != "True":
+        raise ValueError(result.get("Error", "Título não encontrado na OMDb."))
+    app.logger.info("[OMDb] found imdbID=%s title=%s", result.get("imdbID"), result.get("Title"))
+    return {
+        "imdbID": result.get("imdbID", ""),
+        "title": result.get("Title", title),
+        "year": result.get("Year", ""),
+        "plot": result.get("Plot", "Sinopse não disponível."),
+        "poster": result.get("Poster", "N/A"),
+        "type": result.get("Type", ""),
+    }
 
 
 def game_snapshot(room):
@@ -263,13 +395,34 @@ def upload_file_route():
     if file.filename == "":
         return {"error": "Arquivo sem nome"}, 400
 
-    ext = os.path.splitext(file.filename)[1]
+    if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+        return {"error": "Arquivo muito grande. O limite é 16 MB."}, 413
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt", ".mp4", ".mov"}
+    if ext not in allowed_extensions:
+        return {"error": "Tipo de arquivo não suportado."}, 415
     unique_name = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join(app.config["UPLOAD_FOLDER"], unique_name)
     file.save(save_path)
 
     file_url = f"/uploads/{unique_name}"
     return {"url": file_url, "filename": file.filename}
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return {"error": "Arquivo muito grande. O limite é 16 MB."}, 413
+
+
+@app.route("/api/supabase-check")
+def supabase_check():
+    try:
+        note = load_note_sync()
+        return {"ok": True, "table": "filmes_lista", "text_length": len(note["text"])}
+    except Exception as error:
+        app.logger.exception("Supabase connection check failed")
+        return {"ok": False, "error": str(error)}, 503
 
 @socketio.on("connect")
 def handle_connect():
@@ -303,7 +456,7 @@ def authenticate(data):
             room["admin_sid"] = room["admin_sid"] or request.sid
 
     join_room(SESSION_ROOM)
-    note = load_note()
+    note = empty_list_state()
     emit("login_success", {
         "room": SESSION_ROOM,
         "name": name,
@@ -313,9 +466,12 @@ def authenticate(data):
             for player in room["players"].values()
         ],
         "chat_messages": room["chat_messages"],
-        "note": {**note, "can_undo": bool(note["history"])},
+        "note": {**note, "can_undo": False},
+        "list_items": [],
+        "calendar": {"events": [], "cycle": None},
         "game": game_snapshot(room)
     })
+    socketio.start_background_task(send_initial_shared_state, request.sid, name)
     broadcast_players(room)
 
 @socketio.on("start_game")
@@ -374,27 +530,144 @@ def leave_game(data=None):
 def note_update(data):
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
-    note = load_note()
+    note = load_note_sync()
     text = str(data.get("text") or "")[:20000]
     if text == note["text"]:
         return
     note["history"].append(note["text"])
     note["history"] = note["history"][-50:]
     note["text"] = text
-    save_note(note)
+    save_note_sync(note)
     socketio.emit("note_updated", {"text": text, "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+
+
+@socketio.on("note_request")
+def note_request():
+    if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
+        return
+    note = load_note_sync()
+    emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])})
+    emit("list_updated", {"items": note["items"]})
+    player_name = rooms[SESSION_ROOM]["players"][request.sid]["name"]
+    emit("calendar_updated", calendar_snapshot(note, load_cycle_sync(player_name)))
 
 
 @socketio.on("note_undo")
 def note_undo():
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
-    note = load_note()
+    note = load_note_sync()
     if not note["history"]:
         return
     note["text"] = note["history"].pop()
-    save_note(note)
+    save_note_sync(note)
     socketio.emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+
+
+@socketio.on("list_search")
+def list_search(data):
+    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
+        return
+    title = str(data.get("title") or "").strip()[:120]
+    if len(title) < 2:
+        emit("list_search_result", {"ok": False, "error": "Digite pelo menos 2 caracteres."})
+        return
+    try:
+        emit("list_search_result", {"ok": True, "item": fetch_omdb_title(title)})
+    except Exception as error:
+        emit("list_search_result", {"ok": False, "error": str(error)})
+
+
+@socketio.on("list_add")
+def list_add(data):
+    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
+        return
+    item = data.get("item") or {}
+    title = str(item.get("title") or "").strip()[:200]
+    if not title:
+        return
+    note = load_note_sync()
+    item = {
+        "imdbID": str(item.get("imdbID") or uuid.uuid4().hex),
+        "title": title,
+        "year": str(item.get("year") or ""),
+        "plot": str(item.get("plot") or "Sinopse não disponível.")[:2000],
+        "poster": str(item.get("poster") or "N/A"),
+        "type": str(item.get("type") or ""),
+    }
+    if any(existing.get("imdbID") == item["imdbID"] for existing in note["items"]):
+        emit("list_updated", {"items": note["items"]})
+        return
+    note["items"] = [*note["items"], item][-100:]
+    save_note_sync(note)
+    socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+
+
+@socketio.on("list_remove")
+def list_remove(data):
+    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
+        return
+    item_id = str(data.get("imdbID") or "")
+    note = load_note_sync()
+    note["items"] = [item for item in note["items"] if item.get("imdbID") != item_id]
+    save_note_sync(note)
+    socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+
+
+@socketio.on("calendar_request")
+def calendar_request():
+    room = rooms.get(SESSION_ROOM, {})
+    player = room.get("players", {}).get(request.sid)
+    if not player:
+        return
+    emit("calendar_updated", calendar_snapshot(load_note_sync(), load_cycle_sync(player["name"])))
+
+
+@socketio.on("calendar_event_save")
+def calendar_event_save(data):
+    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
+        return
+    date = str(data.get("date") or "")[:10]
+    title = str(data.get("title") or "Encontro").strip()[:120]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not title:
+        return
+    note = load_note_sync()
+    event = {"id": str(data.get("id") or uuid.uuid4().hex), "date": date, "title": title}
+    note["events"] = [event if current.get("id") == event["id"] else current for current in note["events"]]
+    if not any(current.get("id") == event["id"] for current in note["events"]):
+        note["events"].append(event)
+    save_note_sync(note)
+    socketio.emit("calendar_updated", {"events": note["events"]}, to=SESSION_ROOM)
+
+
+@socketio.on("calendar_event_remove")
+def calendar_event_remove(data):
+    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
+        return
+    note = load_note_sync()
+    event_id = str(data.get("id") or "")
+    note["events"] = [event for event in note["events"] if event.get("id") != event_id]
+    save_note_sync(note)
+    socketio.emit("calendar_updated", {"events": note["events"]}, to=SESSION_ROOM)
+
+
+@socketio.on("calendar_cycle_save")
+def calendar_cycle_save(data):
+    room = rooms.get(SESSION_ROOM, {})
+    player = room.get("players", {}).get(request.sid)
+    if not player:
+        return
+    last_period = str(data.get("last_period") or "")[:10]
+    try:
+        cycle_length = max(21, min(45, int(data.get("cycle_length") or 28)))
+    except (TypeError, ValueError):
+        cycle_length = 28
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", last_period):
+        return
+    notes = str(data.get("anotacoes_extras") or "").strip()[:2000]
+    cycle = {"last_period": last_period, "cycle_length": cycle_length, "notes": notes}
+    save_cycle_sync(player["name"], cycle)
+    emit("calendar_updated", calendar_snapshot(load_note_sync(), cycle))
 
 
 @socketio.on("stop_draw_letter")
@@ -558,10 +831,21 @@ def send_chat_message(data):
     room = rooms.get(room_code)
 
     if not room or request.sid not in room["players"]:
+        emit("chat_send_failed", {"message": "Sua sessão de chat não está ativa."})
         return
 
     if not text and not file_info:
+        emit("chat_send_failed", {"message": "Digite uma mensagem ou selecione um arquivo."})
         return
+
+    if file_info:
+        if not isinstance(file_info, dict) or not str(file_info.get("url", "")).startswith("/uploads/"):
+            emit("chat_send_failed", {"message": "O arquivo enviado não é válido."})
+            return
+        file_info = {
+            "url": str(file_info.get("url")),
+            "filename": str(file_info.get("filename") or "arquivo")[:160],
+        }
 
     msg_id = f"msg-{uuid.uuid4().hex[:8]}"
     sender_name = room["players"][request.sid]["name"]
@@ -576,7 +860,9 @@ def send_chat_message(data):
     }
 
     room["chat_messages"].append(msg_obj)
+    room["chat_messages"] = room["chat_messages"][-100:]
     socketio.emit("chat_message_received", msg_obj, to=room_code)
+    app.logger.info("[Chat] message sent id=%s has_file=%s", msg_id, bool(file_info))
 
 @socketio.on("edit_chat_message")
 def edit_chat_message(data):
@@ -628,4 +914,5 @@ ensure_files()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=False)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    socketio.run(app, host="0.0.0.0", port=port, debug=debug, use_reloader=False)

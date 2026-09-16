@@ -1,0 +1,9 @@
+{
+  "name": "Nosso Quiz",
+  "short_name": "Nosso Quiz",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff8fa",
+  "theme_color": "#ff527b",
+  "description": "Espaco compartilhado do casal"
+}
