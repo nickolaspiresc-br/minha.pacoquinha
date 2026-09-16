@@ -1,5 +1,5 @@
-from gevent import monkey
-monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
 
 import os
 import json
@@ -23,7 +23,7 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 UPLOAD_FOLDER = os.path.join("data", "uploads")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 DATA_DIR = "data"
 QUESTIONS_FILE = os.path.join(DATA_DIR, "questions.json")
@@ -245,7 +245,7 @@ def sanitize_letters(value):
 
 def stop_round_timeout(round_id):
     for remaining in range(ADEDONHA_DURATION, 0, -1):
-        gevent_sleep(1)
+        eventlet.sleep(1)
         room = rooms.get(SESSION_ROOM)
         game = room.get("active_game") if room else None
         if not room or room.get("stop_round") != round_id or not game or game.get("phase") != "playing":
@@ -253,11 +253,6 @@ def stop_round_timeout(round_id):
         game["remaining"] = remaining - 1
         emit_game_state(room)
     finish_stop_round(room)
-
-
-def gevent_sleep(seconds):
-    from gevent import sleep
-    sleep(seconds)
 
 
 def finish_stop_round(room):
