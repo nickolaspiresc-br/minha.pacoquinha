@@ -3,11 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<<<<<<< HEAD
   <meta name="theme-color" content="#ff527b">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
   <title>Quiz do Amor 💖</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,11 +27,7 @@
       <span class="eyebrow">Nosso cantinho privado</span>
       <h2>Entre para ficar pertinho 💕</h2>
       <p class="login-copy">Este espaço é só para nós dois. Digite seus dados para entrar.</p>
-<<<<<<< HEAD
       <form id="loginForm" action="#" method="post" onsubmit="event.preventDefault(); if (typeof window.handleLoginSubmit === 'function') window.handleLoginSubmit(event); return false;">
-=======
-      <form id="loginForm">
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
         <label for="name">Nome</label>
         <input type="text" id="name" placeholder="Como posso te chamar?" autocomplete="name" required>
 
@@ -51,10 +44,7 @@
         <button class="tab-btn active" id="tabGamesBtn" onclick="switchTab('games')">🎮 Jogos</button>
         <button class="tab-btn" id="tabChatBtn" onclick="switchTab('chat')">💬 Chat <span id="chatBadge" class="unread-badge" hidden></span></button>
         <button class="tab-btn" id="tabListBtn" onclick="switchTab('list')">📋 Lista</button>
-<<<<<<< HEAD
         <button class="tab-btn" id="tabCalendarBtn" onclick="switchTab('calendar')">📅 Calendário</button>
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
       </nav>
 
       <div class="tab-content">
@@ -158,7 +148,6 @@
           <div class="card list-card">
             <span class="eyebrow">Bloco compartilhado</span>
             <h2>Filmes e séries para vermos</h2>
-<<<<<<< HEAD
             <p class="login-copy">Busque um título e ele aparece para vocês dois.</p>
             <div class="list-search-row">
               <input id="listSearchInput" type="search" placeholder="Ex.: About Time" autocomplete="off">
@@ -202,11 +191,6 @@
               </form>
             </details>
             <div id="cycleSummary" class="cycle-summary"></div>
-=======
-            <p class="login-copy">Escreva aqui e a anotação aparece instantaneamente para os dois.</p>
-            <textarea id="sharedNote" class="shared-note" placeholder="Anote títulos, ideias e planos para nosso próximo filme..."></textarea>
-            <div class="note-footer"><span id="noteStatus">Salvo automaticamente</span><button class="secondary undo-button" id="undoNoteBtn" onclick="undoNote()" disabled>↶ Desfazer</button></div>
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
           </div>
         </section>
       </div>
@@ -214,7 +198,6 @@
   </main>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
-<<<<<<< HEAD
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('{{ url_for('static', filename='sw.js') }}')
@@ -222,7 +205,5 @@
         .catch(error => console.warn('[PWA] service worker unavailable', error));
     }
   </script>
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 </body>
 </html>

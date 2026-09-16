@@ -130,10 +130,7 @@ header .subtitle {
   box-shadow: var(--shadow-soft);
   margin-bottom: 16px;
   gap: 8px;
-<<<<<<< HEAD
   overflow-x: auto;
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 }
 
 .tab-btn {
@@ -330,7 +327,6 @@ header .subtitle {
 .kitchen-station span { color: var(--primary); font-size: 0.82rem; margin-top: 4px; }
 
 .shared-note { min-height: 55vh; resize: vertical; }
-<<<<<<< HEAD
 .list-search-row { display: flex; gap: 8px; margin: 14px 0 8px; }
 .list-search-row input { flex: 1; min-width: 0; }
 .list-search-row button { margin: 0; white-space: nowrap; }
@@ -378,8 +374,6 @@ header .subtitle {
 .cycle-summary { color: var(--text-muted); display: grid; font-size: 0.82rem; gap: 5px; margin-top: 14px; }
 .cycle-summary strong { color: var(--text-main); }
 .cycle-alert { background: #fff0d6; border: 1px solid #f1ca8a; border-radius: var(--radius-sm); color: #875b19; font-size: 0.8rem; line-height: 1.4; margin: 12px 0; padding: 10px; }
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 .note-footer { align-items: center; display: flex; justify-content: space-between; margin-top: 10px; }
 .note-footer span { color: var(--text-muted); font-size: 0.8rem; }
 .undo-button { font-size: 0.82rem; margin: 0; padding: 9px 12px; }
@@ -768,12 +762,9 @@ button.secondary:hover {
   margin-top: 8px;
   font-size: 0.85rem;
   color: var(--text-main);
-<<<<<<< HEAD
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 }
 
 .btn-remove-file {
@@ -792,13 +783,10 @@ button.secondary:hover {
   gap: 8px;
   margin-top: 12px;
   align-items: center;
-<<<<<<< HEAD
   position: relative;
   z-index: 2;
   background: var(--card-bg);
   padding-top: 2px;
-=======
->>>>>>> d91e46e3fee0ba7e8491f5ddf219e50bba25079e
 }
 
 .attach-btn {
