@@ -16,6 +16,7 @@ from flask import Flask, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, disconnect as disconnect_client
 from dotenv import load_dotenv
 from supabase import create_client
+from werkzeug.utils import secure_filename
 
 load_dotenv()
 app = Flask(__name__)
@@ -31,6 +32,8 @@ USED_FILE = os.path.join(DATA_DIR, "used.json")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://tkuagggdzzyagvkgrksc.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 SUPABASE_NOTE_ID = 1
+SUPABASE_ANNOTATION_ID = 1
+SUPABASE_ANNOTATION_TABLE = "anotacoes_livres"
 OMDB_API_KEY = os.environ.get("OMDB_API_KEY", "")
 OMDB_API_URL = "https://www.omdbapi.com/"
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_ANON_KEY else None
@@ -87,34 +90,57 @@ def ensure_files():
 def _load_note_from_supabase():
     if supabase is None:
         raise RuntimeError("SUPABASE_ANON_KEY não configurada")
-    app.logger.info("[Supabase] loading filmes_lista id=%s", SUPABASE_NOTE_ID)
-    response = (
-        supabase.table("filmes_lista")
-        .select("text, history, items, events")
-        .eq("id", SUPABASE_NOTE_ID)
-        .maybe_single()
-        .execute()
-    )
-    row = getattr(response, "data", None) or {}
-    if not isinstance(row, dict):
-        row = {}
+    try:
+        app.logger.info("[Supabase] loading filmes_lista id=%s", SUPABASE_NOTE_ID)
+        movies_response = (
+            supabase.table("filmes_lista")
+            .select("items")
+            .eq("id", SUPABASE_NOTE_ID)
+            .maybe_single()
+            .execute()
+        )
+        app.logger.info("[Supabase] loading %s id=%s", SUPABASE_ANNOTATION_TABLE, SUPABASE_ANNOTATION_ID)
+        annotation_response = (
+            supabase.table(SUPABASE_ANNOTATION_TABLE)
+            .select("text, history")
+            .eq("id", SUPABASE_ANNOTATION_ID)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as error:
+        app.logger.exception("[Supabase] shared state SELECT failed: %s", error)
+        raise
+    movie_row = getattr(movies_response, "data", None) or {}
+    annotation_row = getattr(annotation_response, "data", None) or {}
+    if not isinstance(movie_row, dict):
+        movie_row = {}
+    if not isinstance(annotation_row, dict):
+        annotation_row = {}
     return {
-        "text": row.get("text", ""),
-        "history": row.get("history", []) or [],
-        "items": row.get("items", []) or [],
+        "text": annotation_row.get("text", "") or "",
+        "history": annotation_row.get("history", []) or [],
+        "items": movie_row.get("items", []) or [],
     }
 
 
 def _save_note_to_supabase(note):
     if supabase is None:
         raise RuntimeError("SUPABASE_ANON_KEY não configurada")
-    app.logger.info("[Supabase] saving filmes_lista id=%s", SUPABASE_NOTE_ID)
-    supabase.table("filmes_lista").upsert({
-        "id": SUPABASE_NOTE_ID,
-        "text": note["text"],
-        "history": note["history"],
-        "items": note.get("items", []),
-    }).execute()
+    try:
+        app.logger.info("[Supabase] saving filmes_lista id=%s", SUPABASE_NOTE_ID)
+        supabase.table("filmes_lista").upsert({
+            "id": SUPABASE_NOTE_ID,
+            "items": note.get("items", []),
+        }, on_conflict="id").execute()
+        app.logger.info("[Supabase] saving %s id=%s", SUPABASE_ANNOTATION_TABLE, SUPABASE_ANNOTATION_ID)
+        supabase.table(SUPABASE_ANNOTATION_TABLE).upsert({
+            "id": SUPABASE_ANNOTATION_ID,
+            "text": note.get("text", ""),
+            "history": note.get("history", []),
+        }, on_conflict="id").execute()
+    except Exception as error:
+        app.logger.exception("[Supabase] shared state UPSERT failed: %s", error)
+        raise
 
 
 def load_note_sync():
@@ -339,7 +365,10 @@ def upload_file_route():
     if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
         return {"error": "Arquivo muito grande. O limite é 16 MB."}, 413
 
-    ext = os.path.splitext(file.filename)[1].lower()
+    safe_filename = secure_filename(file.filename)
+    ext = os.path.splitext(safe_filename)[1].lower()
+    if not safe_filename or not ext:
+        return {"error": "Nome de arquivo inválido."}, 400
     allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt", ".mp4", ".mov"}
     if ext not in allowed_extensions:
         return {"error": "Tipo de arquivo não suportado."}, 415
@@ -348,7 +377,7 @@ def upload_file_route():
     file.save(save_path)
 
     file_url = f"/uploads/{unique_name}"
-    return {"url": file_url, "filename": file.filename}
+    return {"url": file_url, "filename": safe_filename}
 
 
 @app.errorhandler(413)
@@ -469,36 +498,48 @@ def leave_game(data=None):
 def note_update(data):
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
-    note = load_note_sync()
-    text = str(data.get("text") or "")[:20000]
-    if text == note["text"]:
-        return
-    note["history"].append(note["text"])
-    note["history"] = note["history"][-50:]
-    note["text"] = text
-    save_note_sync(note)
-    socketio.emit("note_updated", {"text": text, "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+    try:
+        note = load_note_sync()
+        text = str((data or {}).get("text") or "")[:20000]
+        if text == note["text"]:
+            return
+        note["history"].append(note["text"])
+        note["history"] = note["history"][-50:]
+        note["text"] = text
+        save_note_sync(note)
+        socketio.emit("note_updated", {"text": text, "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+    except Exception as error:
+        app.logger.exception("[Supabase] note update failed: %s", error)
+        emit("persistence_error", {"message": "Não foi possível salvar a anotação agora."})
 
 
 @socketio.on("note_request")
 def note_request():
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
-    note = load_note_sync()
-    emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])})
-    emit("list_updated", {"items": note["items"]})
+    try:
+        note = load_note_sync()
+        emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])})
+        emit("list_updated", {"items": note["items"]})
+    except Exception as error:
+        app.logger.exception("[Supabase] shared state request failed: %s", error)
+        emit("persistence_error", {"message": "Não foi possível carregar a lista agora."})
 
 
 @socketio.on("note_undo")
 def note_undo():
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
         return
-    note = load_note_sync()
-    if not note["history"]:
-        return
-    note["text"] = note["history"].pop()
-    save_note_sync(note)
-    socketio.emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+    try:
+        note = load_note_sync()
+        if not note["history"]:
+            return
+        note["text"] = note["history"].pop()
+        save_note_sync(note)
+        socketio.emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])}, to=SESSION_ROOM)
+    except Exception as error:
+        app.logger.exception("[Supabase] note undo failed: %s", error)
+        emit("persistence_error", {"message": "Não foi possível desfazer a anotação."})
 
 
 @socketio.on("list_search")
@@ -519,36 +560,47 @@ def list_search(data):
 def list_add(data):
     if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
         return
-    item = data.get("item") or {}
+    item = (data or {}).get("item") or {}
     title = str(item.get("title") or "").strip()[:200]
     if not title:
         return
-    note = load_note_sync()
-    item = {
-        "imdbID": str(item.get("imdbID") or uuid.uuid4().hex),
-        "title": title,
-        "year": str(item.get("year") or ""),
-        "plot": str(item.get("plot") or "Sinopse não disponível.")[:2000],
-        "poster": str(item.get("poster") or "N/A"),
-        "type": str(item.get("type") or ""),
-    }
-    if any(existing.get("imdbID") == item["imdbID"] for existing in note["items"]):
-        emit("list_updated", {"items": note["items"]})
-        return
-    note["items"] = [*note["items"], item][-100:]
-    save_note_sync(note)
-    socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+    try:
+        note = load_note_sync()
+        item = {
+            "imdbID": str(item.get("imdbID") or uuid.uuid4().hex),
+            "title": title,
+            "year": str(item.get("year") or ""),
+            "plot": str(item.get("plot") or "Sinopse não disponível.")[:2000],
+            "poster": str(item.get("poster") or "N/A"),
+            "type": str(item.get("type") or ""),
+        }
+        if any(existing.get("imdbID") == item["imdbID"] for existing in note["items"]):
+            emit("list_updated", {"items": note["items"]})
+            return
+        note["items"] = [*note["items"], item][-100:]
+        save_note_sync(note)
+        socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+    except Exception as error:
+        app.logger.exception("[Supabase] movie insert failed: %s", error)
+        emit("persistence_error", {"message": "Não foi possível salvar o filme agora."})
 
 
 @socketio.on("list_remove")
 def list_remove(data):
     if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
         return
-    item_id = str(data.get("imdbID") or "")
-    note = load_note_sync()
-    note["items"] = [item for item in note["items"] if item.get("imdbID") != item_id]
-    save_note_sync(note)
-    socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+    item_id = str((data or {}).get("imdbID") or "")
+    if not item_id:
+        emit("persistence_error", {"message": "Filme inválido para remoção."})
+        return
+    try:
+        note = load_note_sync()
+        note["items"] = [item for item in note["items"] if item.get("imdbID") != item_id]
+        save_note_sync(note)
+        socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
+    except Exception as error:
+        app.logger.exception("[Supabase] movie delete failed: %s", error)
+        emit("persistence_error", {"message": "Não foi possível remover o filme agora."})
 
 
 @socketio.on("stop_draw_letter")

@@ -241,6 +241,7 @@ function undoNote() { socket.emit('note_undo'); }
 
 socket.on('note_updated', renderNote);
 socket.on('note_updated', () => console.info('[Supabase] shared note synchronized'));
+socket.on('persistence_error', data => showError(data.message || 'Não foi possível salvar os dados agora.'));
 
 function searchListTitle() {
   const input = $("listSearchInput");
