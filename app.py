@@ -95,12 +95,13 @@ def _load_note_from_supabase():
         .maybe_single()
         .execute()
     )
-    row = response.data or {}
+    row = getattr(response, "data", None) or {}
+    if not isinstance(row, dict):
+        row = {}
     return {
         "text": row.get("text", ""),
         "history": row.get("history", []) or [],
         "items": row.get("items", []) or [],
-        "events": row.get("events", []) or [],
     }
 
 
@@ -113,7 +114,6 @@ def _save_note_to_supabase(note):
         "text": note["text"],
         "history": note["history"],
         "items": note.get("items", []),
-        "events": note.get("events", []),
     }).execute()
 
 
@@ -126,79 +126,25 @@ def save_note_sync(note):
 
 
 def empty_list_state():
-    return {"text": "", "history": [], "items": [], "events": []}
+    return {"text": "", "history": [], "items": []}
 
 
 def supabase_is_configured():
     return supabase is not None
 
 
-def _load_cycle_from_supabase(player_name):
-    if supabase is None:
-        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
-    app.logger.info("[Supabase] loading ciclo_menstrual usuario=%s", player_name)
-    response = (
-        supabase.table("ciclo_menstrual")
-        .select("data_ultima_menstruacao, duracao_ciclo, anotacoes_extras")
-        .eq("usuario", player_name)
-        .maybe_single()
-        .execute()
-    )
-    row = response.data
-    if not row:
-        return None
-    return {
-        "last_period": row.get("data_ultima_menstruacao"),
-        "cycle_length": row.get("duracao_ciclo", 28),
-        "notes": row.get("anotacoes_extras", "") or "",
-    }
-
-
-def _save_cycle_to_supabase(player_name, cycle):
-    if supabase is None:
-        raise RuntimeError("SUPABASE_ANON_KEY não configurada")
-    app.logger.info("[Supabase] upserting ciclo_menstrual usuario=%s", player_name)
-    supabase.table("ciclo_menstrual").upsert({
-        "usuario": player_name,
-        "data_ultima_menstruacao": cycle["last_period"],
-        "duracao_ciclo": cycle["cycle_length"],
-        "anotacoes_extras": cycle.get("notes", ""),
-    }, on_conflict="usuario").execute()
-
-
-def load_cycle_sync(player_name):
-    return _load_cycle_from_supabase(player_name)
-
-
-def save_cycle_sync(player_name, cycle):
-    return _save_cycle_to_supabase(player_name, cycle)
-
-
-def calendar_snapshot(note, cycle):
-    return {
-        "events": note.get("events", []),
-        "cycle": cycle,
-    }
-
-
-def send_initial_shared_state(sid, player_name):
+def send_initial_shared_state(sid):
     note = empty_list_state()
-    cycle = None
     if supabase_is_configured():
         try:
             note = load_note_sync()
         except Exception:
             app.logger.exception("Could not load shared state after authentication")
-        try:
-            cycle = load_cycle_sync(player_name)
-        except Exception:
-            app.logger.exception("Could not load menstrual cycle after authentication")
     socketio.emit("note_updated", {
         "text": note["text"],
         "can_undo": bool(note["history"]),
     }, to=sid)
     socketio.emit("list_updated", {"items": note["items"]}, to=sid)
-    socketio.emit("calendar_updated", calendar_snapshot(note, cycle), to=sid)
 
 
 def fetch_omdb_title(title):
@@ -462,10 +408,9 @@ def authenticate(data):
         "chat_messages": room["chat_messages"],
         "note": {**note, "can_undo": False},
         "list_items": [],
-        "calendar": {"events": [], "cycle": None},
         "game": game_snapshot(room)
     })
-    socketio.start_background_task(send_initial_shared_state, request.sid, name)
+    socketio.start_background_task(send_initial_shared_state, request.sid)
     broadcast_players(room)
 
 @socketio.on("start_game")
@@ -542,8 +487,8 @@ def note_request():
     note = load_note_sync()
     emit("note_updated", {"text": note["text"], "can_undo": bool(note["history"])})
     emit("list_updated", {"items": note["items"]})
-    player_name = rooms[SESSION_ROOM]["players"][request.sid]["name"]
-    emit("calendar_updated", calendar_snapshot(note, load_cycle_sync(player_name)))
+
+
 @socketio.on("note_undo")
 def note_undo():
     if request.sid not in (rooms.get(SESSION_ROOM, {}).get("players", {})):
@@ -606,60 +551,6 @@ def list_remove(data):
     socketio.emit("list_updated", {"items": note["items"]}, to=SESSION_ROOM)
 
 
-@socketio.on("calendar_request")
-def calendar_request():
-    room = rooms.get(SESSION_ROOM, {})
-    player = room.get("players", {}).get(request.sid)
-    if not player:
-        return
-    emit("calendar_updated", calendar_snapshot(load_note_sync(), load_cycle_sync(player["name"])))
-
-
-@socketio.on("calendar_event_save")
-def calendar_event_save(data):
-    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
-        return
-    date = str(data.get("date") or "")[:10]
-    title = str(data.get("title") or "Encontro").strip()[:120]
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) or not title:
-        return
-    note = load_note_sync()
-    event = {"id": str(data.get("id") or uuid.uuid4().hex), "date": date, "title": title}
-    note["events"] = [event if current.get("id") == event["id"] else current for current in note["events"]]
-    if not any(current.get("id") == event["id"] for current in note["events"]):
-        note["events"].append(event)
-    save_note_sync(note)
-    socketio.emit("calendar_updated", {"events": note["events"]}, to=SESSION_ROOM)
-
-
-@socketio.on("calendar_event_remove")
-def calendar_event_remove(data):
-    if request.sid not in rooms.get(SESSION_ROOM, {}).get("players", {}):
-        return
-    note = load_note_sync()
-    event_id = str(data.get("id") or "")
-    note["events"] = [event for event in note["events"] if event.get("id") != event_id]
-    save_note_sync(note)
-    socketio.emit("calendar_updated", {"events": note["events"]}, to=SESSION_ROOM)
-
-
-@socketio.on("calendar_cycle_save")
-def calendar_cycle_save(data):
-    room = rooms.get(SESSION_ROOM, {})
-    player = room.get("players", {}).get(request.sid)
-    if not player:
-        return
-    last_period = str(data.get("last_period") or "")[:10]
-    try:
-        cycle_length = max(21, min(45, int(data.get("cycle_length") or 28)))
-    except (TypeError, ValueError):
-        cycle_length = 28
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", last_period):
-        return
-    notes = str(data.get("anotacoes_extras") or "").strip()[:2000]
-    cycle = {"last_period": last_period, "cycle_length": cycle_length, "notes": notes}
-    save_cycle_sync(player["name"], cycle)
-    emit("calendar_updated", calendar_snapshot(load_note_sync(), cycle))
 @socketio.on("stop_draw_letter")
 def stop_draw_letter():
     room = rooms.get(SESSION_ROOM)

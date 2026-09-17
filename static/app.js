@@ -21,10 +21,6 @@ let chatSendPending = false;
 let activeGame = null;
 let noteTimer = null;
 let listItems = [];
-let calendarEvents = [];
-let calendarCycle = null;
-let calendarDate = new Date();
-let selectedCalendarDate = null;
 let loginTimeout = null;
 let pendingLogin = null;
 
@@ -32,10 +28,6 @@ document.addEventListener("DOMContentLoaded", () => {
   createHeartsBackground();
   const sharedNote = $("sharedNote");
   if (sharedNote) sharedNote.addEventListener("input", queueNoteUpdate);
-  const eventForm = $("eventForm");
-  if (eventForm) eventForm.addEventListener("submit", saveCalendarEvent);
-  const cycleForm = $("cycleForm");
-  if (cycleForm) cycleForm.addEventListener("submit", saveCycleSettings);
   const listSearchInput = $("listSearchInput");
   if (listSearchInput) listSearchInput.addEventListener("keydown", event => {
     if (event.key === "Enter") { event.preventDefault(); searchListTitle(); }
@@ -141,7 +133,6 @@ function openRoom(data) {
   (data.chat_messages || []).forEach(renderChatMessage);
   renderNote(data.note || { text: "", can_undo: false });
   renderListItems(data.list_items || []);
-  renderCalendar(data.calendar || { events: [], cycle: null });
   if (data.game) {
     renderGame(data.game);
   } else {
@@ -192,12 +183,9 @@ function switchTab(tab) {
     $("gamesTabSection").hidden = false;
     $("chatTabSection").hidden = true;
     $("listTabSection").hidden = true;
-    $("calendarTabSection").hidden = true;
     $("tabGamesBtn").classList.add("active");
     $("tabChatBtn").classList.remove("active");
-    $("tabCalendarBtn").classList.remove("active");
     $("tabListBtn").classList.remove("active");
-    $("tabCalendarBtn").classList.remove("active");
   } else if (tab === 'chat') {
     $("gamesTabSection").hidden = true;
     $("chatTabSection").hidden = false;
@@ -215,18 +203,7 @@ function switchTab(tab) {
     $("tabListBtn").classList.add("active");
     $("tabGamesBtn").classList.remove("active");
     $("tabChatBtn").classList.remove("active");
-    $("tabCalendarBtn").classList.remove("active");
     socket.emit("note_request");
-  } else {
-    $("gamesTabSection").hidden = true;
-    $("chatTabSection").hidden = true;
-    $("listTabSection").hidden = true;
-    $("calendarTabSection").hidden = false;
-    $("tabCalendarBtn").classList.add("active");
-    $("tabGamesBtn").classList.remove("active");
-    $("tabChatBtn").classList.remove("active");
-    $("tabListBtn").classList.remove("active");
-    socket.emit("calendar_request");
   }
 }
 
@@ -325,109 +302,6 @@ socket.on("list_updated", data => {
   $("listSearchStatus").textContent = "Lista sincronizada para vocês dois 💕";
 });
 
-function isoDate(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function dateFromIso(value) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function addDays(date, amount) {
-  const result = new Date(date);
-  result.setDate(result.getDate() + amount);
-  return result;
-}
-
-function calendarCycleDates() {
-  if (!calendarCycle) return null;
-  const last = dateFromIso(calendarCycle.last_period);
-  const next = addDays(last, calendarCycle.cycle_length);
-  return { last, next, periodEnd: addDays(next, 4), fertileStart: addDays(next, -19), fertileEnd: addDays(next, -13) };
-}
-
-function renderCalendar(data) {
-  if (data.events) calendarEvents = data.events;
-  if (Object.prototype.hasOwnProperty.call(data, "cycle")) calendarCycle = data.cycle;
-  const year = calendarDate.getFullYear();
-  const month = calendarDate.getMonth();
-  $("calendarMonthLabel").textContent = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(calendarDate);
-  const firstDay = new Date(year, month, 1).getDay();
-  const days = new Date(year, month + 1, 0).getDate();
-  const cycle = calendarCycleDates();
-  const cells = [];
-  for (let i = 0; i < firstDay; i++) cells.push('<span class="calendar-empty"></span>');
-  for (let day = 1; day <= days; day++) {
-    const current = new Date(year, month, day);
-    const date = isoDate(current);
-    const dayEvents = calendarEvents.filter(event => event.date === date);
-    const classes = ["calendar-day"];
-    if (date === isoDate(new Date())) classes.push("today");
-    if (selectedCalendarDate === date) classes.push("selected");
-    if (cycle && current >= cycle.next && current <= cycle.periodEnd) classes.push("period-day");
-    if (cycle && current >= cycle.fertileStart && current <= cycle.fertileEnd) classes.push("fertile-day");
-    cells.push(`<button type="button" class="${classes.join(" ")}" onclick="selectCalendarDate('${date}')"><span>${day}</span>${dayEvents.length ? '<i class="event-dot"></i>' : ''}</button>`);
-  }
-  $("calendarGrid").innerHTML = cells.join("");
-  renderSelectedCalendarDate();
-  renderCycleSummary(cycle);
-}
-
-function changeCalendarMonth(amount) { calendarDate.setMonth(calendarDate.getMonth() + amount); renderCalendar({}); }
-
-function selectCalendarDate(date) { selectedCalendarDate = date; renderCalendar({}); }
-
-function renderSelectedCalendarDate() {
-  const label = $("selectedDateLabel");
-  const form = $("eventForm");
-  if (!selectedCalendarDate) { label.textContent = "Escolha um dia para marcar um encontro."; form.hidden = true; }
-  else { label.textContent = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full" }).format(dateFromIso(selectedCalendarDate)); form.hidden = false; }
-  const events = calendarEvents.filter(event => event.date === selectedCalendarDate);
-  $("calendarEvents").innerHTML = events.map(event => `<div class="calendar-event"><span>💕 ${escapeHtml(event.title)}</span><button type="button" aria-label="Remover encontro" onclick="removeCalendarEvent('${event.id}')">×</button></div>`).join("");
-}
-
-function saveCalendarEvent(event) {
-  event.preventDefault();
-  socket.emit("calendar_event_save", { date: selectedCalendarDate, title: $("eventTitle").value.trim() });
-  $("eventTitle").value = "";
-}
-
-function removeCalendarEvent(id) { socket.emit("calendar_event_remove", { id }); }
-
-function saveCycleSettings(event) {
-  event.preventDefault();
-  socket.emit("calendar_cycle_save", {
-    last_period: $("lastPeriod").value,
-    cycle_length: $("cycleLength").value,
-    anotacoes_extras: $("cycleNotes").value
-  });
-}
-
-function renderCycleSummary(cycle) {
-  const summary = $("cycleSummary");
-  const alert = $("cycleAlert");
-  if (!cycle) { summary.textContent = "Seu ciclo fica privado e só aparece depois que você configurar."; alert.hidden = true; return; }
-  $("lastPeriod").value = cycle.last_period;
-  $("cycleLength").value = cycle.cycle_length;
-  $("cycleNotes").value = cycle.notes || "";
-  const dates = calendarCycleDates();
-  summary.innerHTML = `<strong>Estimativas para você</strong><span>Próxima menstruação: ${formatDate(dates.next)}</span><span>Período previsto: ${formatDate(dates.next)} a ${formatDate(dates.periodEnd)}</span><span>Período fértil estimado: ${formatDate(dates.fertileStart)} a ${formatDate(dates.fertileEnd)}</span>`;
-  const delayed = new Date() > dates.next;
-  alert.hidden = !delayed;
-  alert.textContent = delayed ? "Sua previsão passou sem um novo registro. Ciclos podem variar; cuide-se com carinho e procure orientação profissional se isso trouxer preocupação." : "";
-}
-
-function formatDate(date) { return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium" }).format(date); }
-
-socket.on("calendar_updated", renderCalendar);
-socket.on("calendar_updated", data => {
-  console.info("[Supabase] calendar synchronized", {
-    events: data.events?.length || 0,
-    hasPrivateCycle: Boolean(data.cycle)
-  });
-});
-
 function renderGame(game) {
   activeGame = game;
   if (game.type === 'questions') {
@@ -462,10 +336,21 @@ function renderStopotes(game) {
   $('stopTimer').textContent = game.phase === 'playing' ? `${game.remaining}s restantes` : game.phase === 'results' ? 'Rodada encerrada' : 'Pronto para sortear';
   $('drawLetterBtn').disabled = game.phase === 'playing';
   $('stopBtn').disabled = game.phase !== 'playing';
-  $('stopCategories').innerHTML = categories.map(([key, label]) => `
-    <label>${label}<input class="stop-input" data-category="${key}" ${game.phase !== 'playing' ? 'disabled' : ''} value="${escapeHtml((game.answers[socket.id] || {})[key] || '')}"></label>
-  `).join('');
-  document.querySelectorAll('.stop-input').forEach(input => input.oninput = updateStopAnswer);
+  const currentAnswers = game.answers?.[socket.id] || {};
+  const existingInputs = new Map(
+    [...document.querySelectorAll('.stop-input')].map(input => [input.dataset.category, input])
+  );
+  if (existingInputs.size !== categories.length) {
+    $('stopCategories').innerHTML = categories.map(([key, label]) => `
+      <label>${label}<input class="stop-input" data-category="${key}" autocomplete="off"></label>
+    `).join('');
+  }
+  document.querySelectorAll('.stop-input').forEach(input => {
+    const serverValue = currentAnswers[input.dataset.category] || '';
+    if (document.activeElement !== input && input.value !== serverValue) input.value = serverValue;
+    input.disabled = game.phase !== 'playing';
+    input.oninput = updateStopAnswer;
+  });
   $('stopResults').hidden = game.phase !== 'results';
   if (game.phase === 'results') {
     const scores = game.results.scores || {};

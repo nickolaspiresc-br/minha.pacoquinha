@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#ff527b">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-  <title>Quiz do Amor 💖</title>
+  <title>Nosso Cantinho 💖</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@1,600&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
   <main class="container">
     <header>
       <div class="badge-icon">💖</div>
-      <h1>Nosso Quiz</h1>
+      <h1>Nosso Cantinho</h1>
       <p class="subtitle">Para a Minha Paçoquinha 🥜✨</p>
     </header>
 
@@ -44,7 +44,6 @@
         <button class="tab-btn active" id="tabGamesBtn" onclick="switchTab('games')">🎮 Jogos</button>
         <button class="tab-btn" id="tabChatBtn" onclick="switchTab('chat')">💬 Chat <span id="chatBadge" class="unread-badge" hidden></span></button>
         <button class="tab-btn" id="tabListBtn" onclick="switchTab('list')">📋 Lista</button>
-        <button class="tab-btn" id="tabCalendarBtn" onclick="switchTab('calendar')">📅 Calendário</button>
       </nav>
 
       <div class="tab-content">
@@ -163,36 +162,6 @@
           </div>
         </section>
 
-        <section id="calendarTabSection" hidden>
-          <div class="card calendar-card">
-            <div class="section-heading">
-              <div><span class="eyebrow">Nosso tempo</span><h2 id="calendarMonthLabel">Calendário</h2></div>
-              <div class="calendar-nav"><button class="secondary" type="button" onclick="changeCalendarMonth(-1)" aria-label="Mês anterior">‹</button><button class="secondary" type="button" onclick="changeCalendarMonth(1)" aria-label="Próximo mês">›</button></div>
-            </div>
-            <div id="cycleAlert" class="cycle-alert" hidden></div>
-            <div class="calendar-weekdays"><span>Dom</span><span>Seg</span><span>Ter</span><span>Qua</span><span>Qui</span><span>Sex</span><span>Sáb</span></div>
-            <div id="calendarGrid" class="calendar-grid"></div>
-            <div id="selectedDateLabel" class="selected-date-label">Escolha um dia para marcar um encontro.</div>
-            <form id="eventForm" class="event-form" hidden>
-              <input id="eventTitle" type="text" maxlength="120" placeholder="Ex.: jantar e filme" required>
-              <button type="submit">Adicionar encontro</button>
-            </form>
-            <div id="calendarEvents" class="calendar-events"></div>
-          </div>
-          <div class="card cycle-card">
-            <details>
-              <summary>Configuração do ciclo, somente para você</summary>
-              <p class="login-copy">Uma estimativa acolhedora, não substitui orientação médica.</p>
-              <form id="cycleForm" class="cycle-form">
-                <label for="lastPeriod">Última menstruação</label><input id="lastPeriod" type="date" required>
-                <label for="cycleLength">Duração média do ciclo</label><input id="cycleLength" type="number" min="21" max="45" value="28" required>
-                <label for="cycleNotes">Anotações extras</label><textarea id="cycleNotes" maxlength="2000" placeholder="Observações privadas"></textarea>
-                <button type="submit">Salvar configuração</button>
-              </form>
-            </details>
-            <div id="cycleSummary" class="cycle-summary"></div>
-          </div>
-        </section>
       </div>
     </div>
   </main>
@@ -200,7 +169,7 @@
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('{{ url_for('static', filename='sw.js') }}')
+      navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}")
         .then(() => console.info('[PWA] service worker ready'))
         .catch(error => console.warn('[PWA] service worker unavailable', error));
     }

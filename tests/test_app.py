@@ -13,9 +13,7 @@ class AppSocketTestCase(unittest.TestCase):
             "text": "",
             "history": [],
             "items": [],
-            "events": [],
         }
-        self.cycle = None
         self.client_a = application.socketio.test_client(application.app)
         self.client_b = None
 
@@ -147,41 +145,14 @@ class AppSocketTestCase(unittest.TestCase):
 
     @patch.object(application, "load_note_sync")
     @patch.object(application, "save_note_sync")
-    def test_calendar_event_is_saved_and_broadcast(self, save_note, load_note):
+    def test_note_update_persists_text_and_undo(self, save_note, load_note):
         load_note.return_value = self.note
         self.authenticate(self.client_a, "Alice")
         self.client_a.get_received()
 
-        self.client_a.emit("calendar_event_save", {"date": "2026-09-20", "title": "Jantar"})
-        events = self.client_a.get_received()
-
-        save_note.assert_called_once()
-        self.assertEqual(save_note.call_args.args[0]["events"][0]["title"], "Jantar")
-        self.assertTrue(any(event["name"] == "calendar_updated" for event in events))
-
-    @patch.object(application, "load_note_sync", return_value={"text": "", "history": [], "items": [], "events": []})
-    @patch.object(application, "save_cycle_sync")
-    def test_cycle_uses_private_upsert_payload(self, save_cycle, load_note):
-        self.authenticate(self.client_a, "Alice")
-        self.client_a.get_received()
-
-        self.client_a.emit(
-            "calendar_cycle_save",
-            {
-                "last_period": "2026-09-01",
-                "cycle_length": 30,
-                "anotacoes_extras": "Observação privada",
-            },
-        )
-
-        save_cycle.assert_called_once_with(
-            "Alice",
-            {
-                "last_period": "2026-09-01",
-                "cycle_length": 30,
-                "notes": "Observação privada",
-            },
-        )
+        self.client_a.emit("note_update", {"text": "Lista livre"})
+        self.assertEqual(save_note.call_args.args[0]["text"], "Lista livre")
+        self.assertEqual(save_note.call_args.args[0]["history"], [""])
 
 
 if __name__ == "__main__":
